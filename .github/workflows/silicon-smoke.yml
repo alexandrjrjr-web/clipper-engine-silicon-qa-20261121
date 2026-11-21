@@ -1,0 +1,124 @@
+name: Test Clipper Engine 2.1.0 on Apple M1
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  official-release-smoke:
+    runs-on: macos-15
+    timeout-minutes: 12
+    steps:
+      - name: Verify, unpack, launch, inspect local application
+        shell: bash
+        env:
+          EXPECTED_SHA256: "20733d7c349a8c5a692f4117f9ce1b0fd44214d288b829632eefb9e257c6c8b7"
+          RELEASE_URL: "https://github.com/rrobin9/clipper-engine/releases/download/v2.1.0/Clipper-Engine-mac-arm64.zip"
+        run: |
+          set -Euo pipefail
+          WORK="$RUNNER_TEMP/clipper-official-review"
+          mkdir -p "$WORK/extracted"
+          cd "$WORK"
+          report() { printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"; }
+          report "# Clipper Engine 2.1.0 — Apple Silicon smoke test"
+          report ""
+          echo "Machine: $(uname -m), $(sw_vers -productVersion)"
+          report "- macOS: $(sw_vers -productVersion); architecture: $(uname -m)"
+          if [[ "$(uname -m)" != arm64 ]]; then
+            report "- ❌ Not an Apple Silicon runner"
+            exit 1
+          fi
+          echo "Available disk:"
+          df -h "$WORK" | tail -1
+          curl -fLSs --retry 2 --retry-delay 3 --connect-timeout 15 --max-time 200 \
+            "$RELEASE_URL" -o release.zip
+          echo "$EXPECTED_SHA256  release.zip" | shasum -a 256 -c -
+          report "- ✅ Downloaded and SHA-256 verified pinned official release (v2.1.0)"
+          python3 - release.zip <<'PY'
+          import sys, zipfile
+          from pathlib import PurePosixPath
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              names=z.namelist()
+              bad=[s for s in names if s.startswith('/') or '..' in PurePosixPath(s).parts]
+              if bad: raise SystemExit("Unsafe archive paths: " + repr(bad[:5]))
+              print("Archive entries:", len(names))
+              print("First entries:", names[:25])
+          PY
+          ditto -xk release.zip extracted
+          APP=$(find "$WORK/extracted" -maxdepth 6 -type d -name "*.app" -print -quit)
+          if [[ -z "$APP" ]]; then
+            report "- ❌ Archive has no macOS .app bundle"
+            find extracted -maxdepth 3 -print | head -70
+            exit 1
+          fi
+          echo "APP: $APP"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist" || true
+          EXEC_NAME=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")
+          BIN="$APP/Contents/MacOS/$EXEC_NAME"
+          if [[ ! -f "$BIN" ]]; then
+            report "- ❌ Bundle executable missing"
+            exit 1
+          fi
+          file "$BIN"
+          lipo -archs "$BIN"
+          if ! lipo -archs "$BIN" | grep -qw arm64; then
+            report "- ❌ Bundle cannot run natively on Apple M1"
+            exit 1
+          fi
+          report "- ✅ Found macOS application with arm64-compatible executable"
+          echo "Signature / Gatekeeper diagnostics (non-fatal):"
+          codesign --verify --deep --strict "$APP" 2>&1 || true
+          spctl --assess --type execute -v "$APP" 2>&1 || true
+
+          echo "Opening .app via LaunchServices..."
+          open "$APP" > "$WORK/open.log" 2>&1 || true
+          LISTENING=0
+          for attempt in {1..10}; do
+            HTTP_CODE=$(curl --max-time 2 -sS -o "$WORK/index.html" -w '%{http_code}' \
+              http://127.0.0.1:7377/ 2>/dev/null || true)
+            if [[ "$HTTP_CODE" == 200 ]]; then LISTENING=1; break; fi
+            sleep 2
+          done
+          if [[ "$LISTENING" != 1 ]]; then
+            echo "LaunchServices did not respond on :7377; trying direct bundle binary for diagnosis"
+            "$BIN" > "$WORK/direct.log" 2>&1 &
+            DIRECT_PID=$!
+            echo "Direct PID $DIRECT_PID"
+            for attempt in {1..30}; do
+              HTTP_CODE=$(curl --max-time 2 -sS -o "$WORK/index.html" -w '%{http_code}' \
+                http://127.0.0.1:7377/ 2>/dev/null || true)
+              if [[ "$HTTP_CODE" == 200 ]]; then LISTENING=1; break; fi
+              if ! kill -0 "$DIRECT_PID" 2>/dev/null; then
+                echo "Direct executable terminated before opening the port"
+                break
+              fi
+              sleep 2
+            done
+          fi
+          echo "OS processes:"; ps ax -o pid,command | grep -iE 'Clipper|7377' | grep -v grep | head -20 || true
+          echo "Port 7377:"; lsof -nP -iTCP:7377 -sTCP:LISTEN || true
+          echo "open.log:"; tail -30 "$WORK/open.log" || true
+          if [[ -f "$WORK/direct.log" ]]; then
+            echo "direct.log:"; tail -90 "$WORK/direct.log" || true
+          fi
+          if [[ "$LISTENING" != 1 ]]; then
+            report "- ❌ App never served HTTP 200 at http://127.0.0.1:7377/"
+            exit 1
+          fi
+          report "- ✅ Local web interface returned HTTP 200 on localhost:7377"
+          echo "HTML title/meta snippets:"
+          grep -ioE '<title>[^<]{1,120}|Clipper Engine|<html[^>]*' "$WORK/index.html" | head -12 || true
+          echo "Public API manifest probe:"
+          if curl --max-time 4 -fsS http://127.0.0.1:7377/openapi.json > "$WORK/openapi.json"; then
+            python3 - "$WORK/openapi.json" <<'PY'
+          import json,sys
+          obj=json.load(open(sys.argv[1]))
+          print("OpenAPI paths:", list(obj.get("paths",{}))[:40])
+          PY
+            report "- ✅ OpenAPI discovery endpoint available"
+          else
+            report "- ℹ️ No OpenAPI discovery endpoint at /openapi.json (not considered a failure)"
+          fi
+          report "- ⚠️ Not tested: automatic highlight accuracy, Twitch/YouTube/Kick streaming, captions, export, or actual interactive UI"
+          echo "Smoke test passed."
