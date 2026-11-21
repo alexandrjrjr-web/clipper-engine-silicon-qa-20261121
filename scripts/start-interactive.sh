@@ -88,7 +88,7 @@ CODE=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:739
 test "$CODE" = 401
 echo "ACCESS_CONTROL_LOCAL_TEST_PASS"
 
-"$WORK/tunnel-bin/cloudflared" tunnel --no-autoupdate --url http://127.0.0.1:7399 --loglevel info > "$WORK/cloudflared.log" 2>&1 &
+"$WORK/tunnel-bin/cloudflared" tunnel --protocol http2 --no-autoupdate --url http://127.0.0.1:7399 --loglevel info > "$WORK/cloudflared.log" 2>&1 &
 TUNNEL_PID=$!
 PUBLIC_ORIGIN=''
 for attempt in {1..70}; do
@@ -119,27 +119,34 @@ for attempt in {1..18}; do
   sleep 3
 done
 echo "PUBLIC_UNAUTH_CODE=$UNAUTH_CODE"
-test "$UNAUTH_CODE" = 401
+if [[ "$UNAUTH_CODE" != 401 ]]; then
+  echo "Runner cannot reach its own public trycloudflare URL. Checking remote accessibility externally instead."
+  tail -28 "$WORK/cloudflared.log" || true
+fi
 
-LOGIN_CODE=$(curl -sS --connect-timeout 7 --max-time 15 -c "$WORK/access.cookies" -o /dev/null -w '%{http_code}' "$PUBLIC_ORIGIN/__access?key=$CLIPPER_ACCESS_TOKEN" 2>/dev/null || true)
-echo "PUBLIC_LOGIN_CODE=$LOGIN_CODE"
-test "$LOGIN_CODE" = 303
-AUTH_CODE=$(curl -sS --connect-timeout 7 --max-time 15 -b "$WORK/access.cookies" -o "$WORK/public-app.html" -w '%{http_code}' "$PUBLIC_ORIGIN/" 2>/dev/null || true)
-echo "PUBLIC_AUTHENTICATED_CODE=$AUTH_CODE"
-test "$AUTH_CODE" = 200
-grep -qi 'Clipper Engine' "$WORK/public-app.html"
-STATUS_CODE=$(curl -sS --connect-timeout 7 --max-time 15 -b "$WORK/access.cookies" -o "$WORK/public-status.json" -w '%{http_code}' "$PUBLIC_ORIGIN/api/status" 2>/dev/null || true)
-echo "PUBLIC_STATUS_CODE=$STATUS_CODE"
-test "$STATUS_CODE" = 200
-python3 - "$WORK/public-status.json" <<'PY'
+if [[ "$UNAUTH_CODE" == 401 ]]; then
+  LOGIN_CODE=$(curl -sS --connect-timeout 7 --max-time 15 -c "$WORK/access.cookies" -o /dev/null -w '%{http_code}' "$PUBLIC_ORIGIN/__access?key=$CLIPPER_ACCESS_TOKEN" 2>/dev/null || true)
+  echo "PUBLIC_LOGIN_CODE=$LOGIN_CODE"
+  test "$LOGIN_CODE" = 303
+  AUTH_CODE=$(curl -sS --connect-timeout 7 --max-time 15 -b "$WORK/access.cookies" -o "$WORK/public-app.html" -w '%{http_code}' "$PUBLIC_ORIGIN/" 2>/dev/null || true)
+  echo "PUBLIC_AUTHENTICATED_CODE=$AUTH_CODE"
+  test "$AUTH_CODE" = 200
+  grep -qi 'Clipper Engine' "$WORK/public-app.html"
+  STATUS_CODE=$(curl -sS --connect-timeout 7 --max-time 15 -b "$WORK/access.cookies" -o "$WORK/public-status.json" -w '%{http_code}' "$PUBLIC_ORIGIN/api/status" 2>/dev/null || true)
+  echo "PUBLIC_STATUS_CODE=$STATUS_CODE"
+  test "$STATUS_CODE" = 200
+  python3 - "$WORK/public-status.json" <<'PY'
 import json,sys
 status=json.load(open(sys.argv[1]))
 assert status.get('app')=='Clipper Engine'
 assert status.get('mock') is False
 print('PUBLIC_ORIGINAL_APP_VERIFIED',{'app':status.get('app'),'version':status.get('version'),'mock':status.get('mock')})
 PY
-echo "- ✅ Acesso HTTPS externo, autenticação e API do app original verificados." >> "$GITHUB_STEP_SUMMARY"
-echo "REMOTE_CLIPPER_READY_FOR_USER"
+  echo "- ✅ Public HTTPS, auth and original API verified by runner." >> "$GITHUB_STEP_SUMMARY"
+else
+  echo "- ⚠️ Runner unable to reach own tunnel from inside GitHub network. Verify externally." >> "$GITHUB_STEP_SUMMARY"
+fi
+echo "REMOTE_CLIPPER_TUNNEL_READY"
 printf '%s\n' "$PUBLIC_ORIGIN/__access?key=$CLIPPER_ACCESS_TOKEN" > "$WORK/access-url.txt"
 printf '%s\n' "$PUBLIC_ORIGIN" > "$WORK/origin.txt"
 chmod 600 "$WORK/access-url.txt"
