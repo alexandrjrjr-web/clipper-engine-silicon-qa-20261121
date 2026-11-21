@@ -35,28 +35,30 @@ BIN="$APP/Contents/MacOS/$EXEC_NAME"
 test -f "$BIN"
 lipo -archs "$BIN" | grep -qw arm64
 echo "ORIGINAL_APP_INSTALLED=$(basename "$APP")"
-echo "Starting official headless engine in browser mode (same process seen in successful Mac M1 test)."
-"$APP/Contents/MacOS/clipper-engine" serve --background --port 7377 > engine.log 2>&1 &
+echo "Launching official .app exactly as in the previously passing Mac M1 smoke test."
 open "$APP" > launch.log 2>&1 || true
 
 READY=0
 for attempt in {1..22}; do
-  CODE=$(curl --noproxy '*' -sS --max-time 4 -o root.html -w '%{http_code}' http://127.0.0.1:7377/ 2>/dev/null || true)
+  CODE=$(curl --noproxy '*' -sSL --max-redirs 3 --max-time 4 -o root.html -w '%{http_code}' http://127.0.0.1:7377/ 2>/dev/null || true)
   if [[ "$CODE" == 200 ]] && grep -qi 'Clipper Engine' root.html; then READY=1; break; fi
   sleep 2
 done
 if [[ "$READY" != 1 ]]; then
   echo "LaunchServices did not expose interface, trying native executable directly."
-  "$APP/Contents/MacOS/clipper-engine" serve --background --port 7377 > direct.log 2>&1 &
+  "$BIN" > direct.log 2>&1 &
   for attempt in {1..35}; do
-    CODE=$(curl --noproxy '*' -sS --max-time 4 -o root.html -w '%{http_code}' http://127.0.0.1:7377/ 2>/dev/null || true)
+    CODE=$(curl --noproxy '*' -sSL --max-redirs 3 --max-time 4 -o root.html -w '%{http_code}' http://127.0.0.1:7377/ 2>/dev/null || true)
     if [[ "$CODE" == 200 ]] && grep -qi 'Clipper Engine' root.html; then READY=1; break; fi
     sleep 2
   done
 fi
 if [[ "$READY" != 1 ]]; then
   echo "Cannot open the original app, here's the startup log:"
-  tail -60 engine.log || true
+  echo "Listener:"; lsof -nP -iTCP:7377 -sTCP:LISTEN || true
+  echo "Process list:"; ps ax -o pid,command | grep -i clipper | grep -v grep | head -20 || true
+  echo "Raw HTTP headers:"; curl --noproxy '*' -sS -D - --max-time 6 -o /dev/null http://127.0.0.1:7377/ || true
+  echo "Follow redirect status:"; curl --noproxy '*' -sSL --max-redirs 5 --max-time 6 -o /dev/null -w '%{http_code}\n' http://localhost:7377/ || true
   tail -60 launch.log || true
   tail -60 direct.log || true
   exit 1
