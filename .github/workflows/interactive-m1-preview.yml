@@ -1,0 +1,26 @@
+name: Interactive original Clipper Engine on Mac M1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clipper-m1-interactive
+  cancel-in-progress: true
+
+jobs:
+  virtual-mac-with-browser-access:
+    runs-on: macos-15
+    timeout-minutes: 72
+    steps:
+      - name: Check out temporary preview setup
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Clipper Engine and open protected public preview
+        env:
+          CLIPPER_ACCESS_TOKEN: ${{ secrets.CLIPPER_PREVIEW_TOKEN }}
+        shell: bash
+        run: bash scripts/start-interactive.sh
