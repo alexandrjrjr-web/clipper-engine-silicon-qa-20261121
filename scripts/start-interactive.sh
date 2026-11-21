@@ -35,6 +35,8 @@ BIN="$APP/Contents/MacOS/$EXEC_NAME"
 test -f "$BIN"
 lipo -archs "$BIN" | grep -qw arm64
 echo "ORIGINAL_APP_INSTALLED=$(basename "$APP")"
+echo "Starting official headless engine in browser mode (same process seen in successful Mac M1 test)."
+"$APP/Contents/MacOS/clipper-engine" serve --background --port 7377 > engine.log 2>&1 &
 open "$APP" > launch.log 2>&1 || true
 
 READY=0
@@ -45,7 +47,7 @@ for attempt in {1..22}; do
 done
 if [[ "$READY" != 1 ]]; then
   echo "LaunchServices did not expose interface, trying native executable directly."
-  "$BIN" > direct.log 2>&1 &
+  "$APP/Contents/MacOS/clipper-engine" serve --background --port 7377 > direct.log 2>&1 &
   for attempt in {1..35}; do
     CODE=$(curl --noproxy '*' -sS --max-time 4 -o root.html -w '%{http_code}' http://127.0.0.1:7377/ 2>/dev/null || true)
     if [[ "$CODE" == 200 ]] && grep -qi 'Clipper Engine' root.html; then READY=1; break; fi
@@ -54,6 +56,7 @@ if [[ "$READY" != 1 ]]; then
 fi
 if [[ "$READY" != 1 ]]; then
   echo "Cannot open the original app, here's the startup log:"
+  tail -60 engine.log || true
   tail -60 launch.log || true
   tail -60 direct.log || true
   exit 1
