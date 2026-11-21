@@ -113,7 +113,7 @@ echo "- O acesso exige a chave temporária privada fornecida no ChatGPT." >> "$G
 echo "- A instância fica ligada por até 60 minutos após a verificação." >> "$GITHUB_STEP_SUMMARY"
 
 UNAUTH_CODE=''
-for attempt in {1..18}; do
+for attempt in {1..5}; do
   UNAUTH_CODE=$(curl -sS --connect-timeout 7 --max-time 15 -o "$WORK/public-unauth.html" -w '%{http_code}' "$PUBLIC_ORIGIN/" 2>/dev/null || true)
   if [[ "$UNAUTH_CODE" == 401 ]]; then break; fi
   sleep 3
