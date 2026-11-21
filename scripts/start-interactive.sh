@@ -72,7 +72,7 @@ cd "$GITHUB_WORKSPACE"
 node scripts/preview-proxy.mjs > "$WORK/proxy.log" 2>&1 &
 PROXY_PID=$!
 TUNNEL_PID=0
-trap 'kill "$PROXY_PID" "$TUNNEL_PID" 2>/dev/null || true' EXIT
+trap 'kill "$PROXY_PID" "$TUNNEL_PID" 2>/dev/null || true' ERR
 for attempt in {1..24}; do
   CODE=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7399/__proxy-ping || true)
   if [[ "$CODE" == 200 ]]; then break; fi
@@ -101,7 +101,7 @@ if [[ -z "$PUBLIC_ORIGIN" ]]; then
   exit 1
 fi
 echo "TEMPORARY_PREVIEW_ORIGIN=$PUBLIC_ORIGIN"
-echo "TEMPORARY_PREVIEW_ACCESS_URL=$PUBLIC_ORIGIN/__access?key=$CLIPPER_ACCESS_TOKEN"
+# Access URL is stored in a private workflow artifact, not printed in public logs.
 echo "## Clipper Engine oficial instalado em Mac M1" >> "$GITHUB_STEP_SUMMARY"
 echo "- Site do aplicativo REAL nesta VM: $PUBLIC_ORIGIN" >> "$GITHUB_STEP_SUMMARY"
 echo "- O acesso exige a chave temporária privada fornecida no ChatGPT." >> "$GITHUB_STEP_SUMMARY"
@@ -135,10 +135,9 @@ print('PUBLIC_ORIGINAL_APP_VERIFIED',{'app':status.get('app'),'version':status.g
 PY
 echo "- ✅ Acesso HTTPS externo, autenticação e API do app original verificados." >> "$GITHUB_STEP_SUMMARY"
 echo "REMOTE_CLIPPER_READY_FOR_USER"
-
-for interval in {1..360}; do
-  if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then echo "Tunnel ended"; break; fi
-  if ! kill -0 "$PROXY_PID" 2>/dev/null; then echo "Auth proxy ended"; break; fi
-  sleep 10
-done
-echo "TEMPORARY_PREVIEW_CLOSED"
+printf '%s\n' "$PUBLIC_ORIGIN/__access?key=$CLIPPER_ACCESS_TOKEN" > "$WORK/access-url.txt"
+printf '%s\n' "$PUBLIC_ORIGIN" > "$WORK/origin.txt"
+chmod 600 "$WORK/access-url.txt"
+echo "origin=$PUBLIC_ORIGIN" >> "$GITHUB_OUTPUT"
+echo "PREVIEW_ACCESS_ARTIFACT_READY"
+# Keep native processes and tunnel alive for the next job step.
