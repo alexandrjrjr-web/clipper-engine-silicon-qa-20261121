@@ -20,7 +20,5 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Clipper Engine and open protected public preview
-        env:
-          CLIPPER_ACCESS_TOKEN: ${{ secrets.CLIPPER_PREVIEW_TOKEN }}
         shell: bash
         run: bash scripts/start-interactive.sh
