@@ -6,6 +6,9 @@ OFFICIAL_SHA256="20733d7c349a8c5a692f4117f9ce1b0fd44214d288b829632eefb9e257c6c8b
 TUNNEL_DOWNLOAD="https://github.com/cloudflare/cloudflared/releases/download/2026.11.1/cloudflared-darwin-arm64.tgz"
 TUNNEL_SHA256="02fe4bcf08f2c09699cff30658228a739a0c47fb75f3653d1b8772a27ade4462"
 WORK="$RUNNER_TEMP/clipper-interactive"
+# This is a disposable, single-use access token (not tied to any account).
+CLIPPER_ACCESS_TOKEN="$(openssl rand -hex 24)"
+export CLIPPER_ACCESS_TOKEN
 mkdir -p "$WORK/extracted" "$WORK/tunnel-bin"
 cd "$WORK"
 echo "MAC_CPU=$(uname -m) MACOS=$(sw_vers -productVersion)"
@@ -98,6 +101,7 @@ if [[ -z "$PUBLIC_ORIGIN" ]]; then
   exit 1
 fi
 echo "TEMPORARY_PREVIEW_ORIGIN=$PUBLIC_ORIGIN"
+echo "TEMPORARY_PREVIEW_ACCESS_URL=$PUBLIC_ORIGIN/__access?key=$CLIPPER_ACCESS_TOKEN"
 echo "## Clipper Engine oficial instalado em Mac M1" >> "$GITHUB_STEP_SUMMARY"
 echo "- Site do aplicativo REAL nesta VM: $PUBLIC_ORIGIN" >> "$GITHUB_STEP_SUMMARY"
 echo "- O acesso exige a chave temporária privada fornecida no ChatGPT." >> "$GITHUB_STEP_SUMMARY"
