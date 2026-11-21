@@ -22,3 +22,27 @@ jobs:
       - name: Install Clipper Engine and open protected public preview
         shell: bash
         run: bash scripts/start-interactive.sh
+      - name: Publish short-lived access link artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: temporary-clipper-access
+          path: ${{ runner.temp }}/clipper-interactive/access-url.txt
+          retention-days: 1
+          if-no-files-found: error
+      - name: Keep the actual Mac M1 application and HTTPS tunnel alive
+        shell: bash
+        timeout-minutes: 61
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/clipper-interactive"
+          ORIGIN=$(cat "$WORK/origin.txt")
+          echo "INTERACTIVE_SESSION_ACTIVE=$ORIGIN"
+          for n in {1..360}; do
+            if ! pgrep -f 'cloudflared tunnel' >/dev/null; then echo "TUNNEL_PROCESS_STOPPED"; exit 1; fi
+            if ! curl --noproxy '*' -fsS --max-time 3 http://127.0.0.1:7377/api/status >/dev/null; then
+              echo "ORIGINAL_CLIPPER_PROCESS_STOPPED"; exit 1
+            fi
+            sleep 10
+          done
+          echo "INTERACTIVE_SESSION_EXPIRED"
+
