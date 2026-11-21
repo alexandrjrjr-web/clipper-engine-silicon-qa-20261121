@@ -75,19 +75,19 @@ jobs:
           open "$APP" > "$WORK/open.log" 2>&1 || true
           LISTENING=0
           for attempt in {1..10}; do
-            HTTP_CODE=$(curl --max-time 2 -sS -o "$WORK/index.html" -w '%{http_code}' \
-              http://127.0.0.1:7377/ 2>/dev/null || true)
+            HTTP_CODE=$(curl --noproxy "*" --max-time 4 -sSL --max-redirs 3 -o "$WORK/index.html" -w '%{http_code}' \
+              http://localhost:7377/ 2>/dev/null || true)
             if [[ "$HTTP_CODE" == 200 ]]; then LISTENING=1; break; fi
             sleep 2
           done
-          if [[ "$LISTENING" != 1 ]]; then
+          if [[ "$LISTENING" != 1 ]] && ! lsof -nP -iTCP:7377 -sTCP:LISTEN >/dev/null 2>&1; then
             echo "LaunchServices did not respond on :7377; trying direct bundle binary for diagnosis"
             "$BIN" > "$WORK/direct.log" 2>&1 &
             DIRECT_PID=$!
             echo "Direct PID $DIRECT_PID"
             for attempt in {1..30}; do
-              HTTP_CODE=$(curl --max-time 2 -sS -o "$WORK/index.html" -w '%{http_code}' \
-                http://127.0.0.1:7377/ 2>/dev/null || true)
+              HTTP_CODE=$(curl --noproxy "*" --max-time 4 -sSL --max-redirs 3 -o "$WORK/index.html" -w '%{http_code}' \
+                http://localhost:7377/ 2>/dev/null || true)
               if [[ "$HTTP_CODE" == 200 ]]; then LISTENING=1; break; fi
               if ! kill -0 "$DIRECT_PID" 2>/dev/null; then
                 echo "Direct executable terminated before opening the port"
@@ -98,19 +98,25 @@ jobs:
           fi
           echo "OS processes:"; ps ax -o pid,command | grep -iE 'Clipper|7377' | grep -v grep | head -20 || true
           echo "Port 7377:"; lsof -nP -iTCP:7377 -sTCP:LISTEN || true
+          echo "HTTP diagnostics, localhost and 127.0.0.1:"
+          for ADDRESS in "http://localhost:7377/" "http://127.0.0.1:7377/" "http://localhost:7377/app" "http://localhost:7377/openapi.json" "http://localhost:7377/healthz" "http://localhost:7377/api/status"; do
+            CODE=$(curl --noproxy "*" --max-time 6 -sSL --max-redirs 3 -o "$WORK/probe.txt" -w '%{http_code}' "$ADDRESS" 2>&1 || true)
+            echo "GET $ADDRESS = $CODE, body prefix:"
+            if [[ -f "$WORK/probe.txt" ]]; then head -c 280 "$WORK/probe.txt" || true; echo; fi
+          done
           echo "open.log:"; tail -30 "$WORK/open.log" || true
           if [[ -f "$WORK/direct.log" ]]; then
             echo "direct.log:"; tail -90 "$WORK/direct.log" || true
           fi
           if [[ "$LISTENING" != 1 ]]; then
-            report "- ❌ App never served HTTP 200 at http://127.0.0.1:7377/"
+            report "- ❌ App never served HTTP 200 at http://localhost:7377/"
             exit 1
           fi
           report "- ✅ Local web interface returned HTTP 200 on localhost:7377"
           echo "HTML title/meta snippets:"
           grep -ioE '<title>[^<]{1,120}|Clipper Engine|<html[^>]*' "$WORK/index.html" | head -12 || true
           echo "Public API manifest probe:"
-          if curl --max-time 4 -fsS http://127.0.0.1:7377/openapi.json > "$WORK/openapi.json"; then
+          if curl --max-time 4 -fsS http://localhost:7377/openapi.json > "$WORK/openapi.json"; then
             python3 - "$WORK/openapi.json" <<'PY'
           import json,sys
           obj=json.load(open(sys.argv[1]))
