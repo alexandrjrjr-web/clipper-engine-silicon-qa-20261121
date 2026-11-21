@@ -47,7 +47,8 @@ function reply(req,res) {
 function forwardHeaders(incoming) {
   const h={...incoming};
   for(const key of ['host','connection','proxy-connection','upgrade','x-forwarded-for','x-forwarded-host','x-forwarded-proto']) delete h[key];
-  h.host=upstreamHost+':'+upstreamPort;
+  // Clipper canonicalizes localhost; forward Host localhost to avoid a redirect loop.
+  h.host='localhost:'+upstreamPort;
   h['x-forwarded-proto']='http';
   h['x-forwarded-host']=h.host;
   // Normalize browser Origin/Referer from HTTPS tunnel to the local service.
