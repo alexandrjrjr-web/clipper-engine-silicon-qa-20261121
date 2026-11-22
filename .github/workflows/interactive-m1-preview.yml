@@ -31,13 +31,13 @@ jobs:
           if-no-files-found: error
       - name: Keep the actual Mac M1 application and HTTPS tunnel alive
         shell: bash
-        timeout-minutes: 61
+        timeout-minutes: 58
         run: |
           set -euo pipefail
           WORK="$RUNNER_TEMP/clipper-interactive"
           ORIGIN=$(cat "$WORK/origin.txt")
           echo "INTERACTIVE_SESSION_ACTIVE=$ORIGIN"
-          for n in {1..360}; do
+          for n in {1..300}; do
             if ! pgrep -f 'cloudflared tunnel' >/dev/null; then echo "TUNNEL_PROCESS_STOPPED"; exit 1; fi
             if ! curl --noproxy '*' -fsS --max-time 3 http://127.0.0.1:7377/api/status >/dev/null; then
               echo "ORIGINAL_CLIPPER_PROCESS_STOPPED"; exit 1
